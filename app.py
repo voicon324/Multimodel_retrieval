@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 from src import utils, preprocessing, embedding, retrieval
 
 # --- Cấu hình ---
-MODEL_NAME = "vidore/colSmol-256M"  # Thay đổi nếu cần
+# MODEL_NAME = "vidore/colSmol-256M"  # Thay đổi nếu cần
 # MODEL_NAME = "vidore/colqwen2-v1.0"  # Thay đổi nếu cần
+MODEL_NAME = "5CD-AI/ColVintern-1B-v1"  # Thay đổi nếu cần
 # Cố gắng sử dụng GPU nếu có
 if torch.cuda.is_available():
     DEVICE = "cuda:0"
@@ -127,7 +128,7 @@ with st.sidebar:
                     status_text.text(f"File {i+1}/{total_files}: {file_name} - Tạo embedding cho ảnh {j+1}/{num_images_to_embed} ({img_path.name})...")
                     try:
                         pil_image = Image.open(img_path)
-                        img_embedding = embedding.get_image_embedding(pil_image, model, processor, DEVICE)
+                        img_embedding = embedding.get_image_embedding(pil_image, model, processor, DEVICE, MODEL_NAME)
 
                         if img_embedding is not None:
                             emb_path = utils.get_embedding_path(img_path.name, EMBEDDINGS_DIR)
@@ -198,7 +199,7 @@ if search_button:
     if search_type == "Văn bản" and query_text:
         valid_query = True
         with st.spinner("Đang tạo embedding cho câu hỏi..."):
-            query_embedding = embedding.get_text_embedding(query_text, model, processor, DEVICE)
+            query_embedding = embedding.get_text_embedding(query_text, model, processor, DEVICE, MODEL_NAME)
         if query_embedding is None:
              st.error("Không thể tạo embedding cho câu hỏi. Vui lòng thử lại.")
              valid_query = False
@@ -206,7 +207,7 @@ if search_button:
     elif search_type == "Hình ảnh" and query_image_pil:
          valid_query = True
          with st.spinner("Đang tạo embedding cho ảnh query..."):
-             query_embedding = embedding.get_image_embedding(query_image_pil, model, processor, DEVICE)
+             query_embedding = embedding.get_image_embedding(query_image_pil, model, processor, DEVICE, MODEL_NAME)
          if query_embedding is None:
               st.error("Không thể tạo embedding cho ảnh query. Vui lòng thử lại.")
               valid_query = False

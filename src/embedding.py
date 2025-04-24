@@ -83,7 +83,8 @@ def get_image_embedding(
     image: Image.Image,
     model: ColIdefics3,
     processor: ColIdefics3Processor,
-    device: str
+    device: str,
+    model_name: str
 ) -> torch.Tensor | None:
     """Tạo embedding cho một ảnh PIL."""
     try:
@@ -92,7 +93,13 @@ def get_image_embedding(
             image = image.convert("RGB")
 
         # Xử lý ảnh (đặt trong list vì processor thường xử lý batch)
-        batch_images = processor.process_images([image]).to(device)
+        batch_images = processor.process_images([image])
+        if model_name == '5CD-AI/ColVintern-1B-v1':
+            batch_images["pixel_values"] =  batch_images["pixel_values"].cuda().bfloat16()
+            batch_images["input_ids"] = batch_images["input_ids"].cuda() 
+            batch_images["attention_mask"] = batch_images["attention_mask"].cuda().bfloat16()
+        else:
+            batch_images = batch_images.to(device)
 
         # Forward pass để lấy embedding
         with torch.no_grad():
@@ -117,12 +124,18 @@ def get_text_embedding(
     text: str,
     model: ColIdefics3,
     processor: ColIdefics3Processor,
-    device: str
+    device: str,
+    model_name: str
 ) -> torch.Tensor | None:
     """Tạo embedding cho một đoạn văn bản."""
     try:
+        batch_queries = processor.process_queries([text])
         # Xử lý query (đặt trong list)
-        batch_queries = processor.process_queries([text]).to(device)
+        if model_name == '5CD-AI/ColVintern-1B-v1':
+            batch_queries["input_ids"] = batch_queries["input_ids"].cuda() 
+            batch_queries["attention_mask"] = batch_queries["attention_mask"].cuda().bfloat16()
+        else:
+            batch_queries = batch_queries.to(device)
 
         # Forward pass
         with torch.no_grad():
