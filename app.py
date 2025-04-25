@@ -216,7 +216,7 @@ with st.sidebar:
         # Sử dụng expander để không chiếm quá nhiều không gian ban đầu
         with st.expander(f"Hiện có {len(processed_image_files)} ảnh đã xử lý", expanded=False):
              # Giới hạn số lượng ảnh hiển thị trực tiếp để tránh làm chậm sidebar
-            max_images_to_show_in_sidebar = 20
+            max_images_to_show_in_sidebar = 100
             for i, img_path in enumerate(processed_image_files):
                 if i >= max_images_to_show_in_sidebar:
                     st.caption(f"... và {len(processed_image_files) - max_images_to_show_in_sidebar} ảnh khác.")
