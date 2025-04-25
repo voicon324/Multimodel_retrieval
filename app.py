@@ -303,6 +303,7 @@ if search_button:
                     query_embedding.to(DEVICE), # Đảm bảo query embedding trên đúng device
                     all_embeddings,       # Đã được load lên device
                     embedding_filenames,
+                    processor,
                     k_value # Truyền K value vào hàm find_top_k (Cần đảm bảo hàm này nhận K)
                             # Lưu ý: Hàm find_top_k gốc có thể không cần processor, kiểm tra lại định nghĩa hàm
                 )
