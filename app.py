@@ -10,7 +10,14 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # Import các module từ src
-from src import utils, preprocessing, embedding, retrieval
+# Giả sử các file này tồn tại trong thư mục src cùng cấp với app.py
+# Nếu cấu trúc khác, bạn cần điều chỉnh import
+try:
+    from src import utils, preprocessing, embedding, retrieval
+except ImportError as e:
+    st.error(f"Lỗi import module từ src: {e}. Đảm bảo các file utils.py, preprocessing.py, embedding.py, retrieval.py tồn tại trong thư mục 'src'.")
+    st.stop()
+
 
 # --- Cấu hình ---
 # MODEL_NAME = "vidore/colSmol-256M"  # Thay đổi nếu cần
@@ -61,15 +68,36 @@ st.title("Ứng dụng Tìm kiếm Tài liệu bằng Hình ảnh/Văn bản")
 st.markdown(f"Sử dụng model `{MODEL_NAME}` trên `{DEVICE}`.")
 st.markdown("---")
 
-# --- Phần Upload (Sidebar) ---
+# --- Phần Sidebar ---
 with st.sidebar:
+    # --- Phần điều khiển và Upload ---
+    st.header("Điều khiển & Upload")
     # button delete all embeddings
-    if st.button("Xóa tất cả embeddings"):
+    if st.button("Xóa tất cả embeddings và ảnh đã xử lý"):
+        deleted_embeddings = 0
+        deleted_images = 0
         if EMBEDDINGS_DIR.is_dir():
             for emb_file in EMBEDDINGS_DIR.glob('*.pt'):
-                emb_file.unlink(missing_ok=True)
-            st.success("Đã xóa tất cả embeddings.")
-    st.header("1. Upload & Xử lý Tài liệu")
+                try:
+                    emb_file.unlink(missing_ok=True)
+                    deleted_embeddings += 1
+                except Exception as e:
+                    st.warning(f"Không thể xóa embedding: {emb_file.name} - {e}")
+        if PROCESSED_IMAGES_DIR.is_dir():
+             for img_file in PROCESSED_IMAGES_DIR.iterdir():
+                 if img_file.is_file() and img_file.suffix.lower() in ['.png', '.jpg', '.jpeg', '.webp']:
+                    try:
+                        img_file.unlink(missing_ok=True)
+                        deleted_images += 1
+                    except Exception as e:
+                         st.warning(f"Không thể xóa ảnh: {img_file.name} - {e}")
+
+        st.success(f"Đã xóa {deleted_embeddings} embeddings và {deleted_images} ảnh đã xử lý.")
+        # Force rerun để cập nhật hiển thị ảnh
+        st.rerun()
+
+
+    st.subheader("1. Upload & Xử lý Tài liệu")
     uploaded_files = st.file_uploader(
         "Tải lên file PDF hoặc Ảnh (PNG, JPG, WEBP)",
         type=['pdf', 'png', 'jpg', 'jpeg', 'webp'],
@@ -78,6 +106,7 @@ with st.sidebar:
 
     process_button = st.button("Xử lý Files Đã Tải Lên")
 
+    # --- Logic xử lý file (như cũ) ---
     if process_button and uploaded_files:
         total_files = len(uploaded_files)
         st.info(f"Bắt đầu xử lý {total_files} file...")
@@ -88,66 +117,67 @@ with st.sidebar:
         progress_bar = st.progress(0)
         status_text = st.empty()
 
+        all_processed_image_paths_this_run = [] # Lưu lại path ảnh được xử lý trong lần chạy này
+
         for i, uploaded_file in enumerate(uploaded_files):
             file_name = uploaded_file.name
             status_text.text(f"Đang xử lý file {i+1}/{total_files}: {file_name}...")
             logger.info(f"Đang xử lý file: {file_name}")
 
             try:
-                # 1. Lưu file gốc (tùy chọn nhưng tốt cho việc debug)
+                # 1. Lưu file gốc
                 upload_path = UPLOADS_DIR / utils.sanitize_filename(file_name)
                 with open(upload_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
                 logger.info(f"Đã lưu file gốc vào: {upload_path}")
 
-                processed_image_paths = []
-                # 2. Tiền xử lý (PDF -> Images hoặc Save Image)
+                processed_image_paths_for_file = [] # Path ảnh từ file hiện tại
+                # 2. Tiền xử lý
                 if Path(file_name).suffix.lower() == ".pdf":
                     pdf_paths = preprocessing.convert_pdf_to_images(upload_path, PROCESSED_IMAGES_DIR)
                     if pdf_paths:
-                         processed_image_paths.extend(pdf_paths)
+                        processed_image_paths_for_file.extend(pdf_paths)
                     else:
-                         logger.warning(f"Không thể xử lý PDF: {file_name}. Bỏ qua.")
-                         errored_files.append(file_name + " (PDF processing failed)")
+                        logger.warning(f"Không thể xử lý PDF: {file_name}. Bỏ qua.")
+                        errored_files.append(file_name + " (PDF processing failed)")
 
                 elif Path(file_name).suffix.lower() in ['.png', '.jpg', '.jpeg', '.webp']:
                     img_path = preprocessing.save_uploaded_image(uploaded_file, PROCESSED_IMAGES_DIR)
                     if img_path:
-                         processed_image_paths.append(img_path)
+                        processed_image_paths_for_file.append(img_path)
                     else:
-                         logger.warning(f"Không thể lưu ảnh: {file_name}. Bỏ qua.")
-                         errored_files.append(file_name + " (Image saving failed)")
+                        logger.warning(f"Không thể lưu ảnh: {file_name}. Bỏ qua.")
+                        errored_files.append(file_name + " (Image saving failed)")
                 else:
-                     logger.warning(f"Định dạng file không hỗ trợ: {file_name}. Bỏ qua.")
-                     errored_files.append(file_name + " (Unsupported format)")
+                    logger.warning(f"Định dạng file không hỗ trợ: {file_name}. Bỏ qua.")
+                    errored_files.append(file_name + " (Unsupported format)")
 
+                all_processed_image_paths_this_run.extend(processed_image_paths_for_file) # Thêm vào list tổng
 
-                # 3. Tạo và Lưu Embeddings cho từng ảnh đã xử lý
-                num_images_to_embed = len(processed_image_paths)
-                for j, img_path in enumerate(processed_image_paths):
+                # 3. Tạo và Lưu Embeddings
+                num_images_to_embed = len(processed_image_paths_for_file)
+                for j, img_path in enumerate(processed_image_paths_for_file):
                     status_text.text(f"File {i+1}/{total_files}: {file_name} - Tạo embedding cho ảnh {j+1}/{num_images_to_embed} ({img_path.name})...")
                     try:
-                        pil_image = Image.open(img_path)
+                        pil_image = Image.open(img_path).convert("RGB") # Đảm bảo RGB
                         img_embedding = embedding.get_image_embedding(pil_image, model, processor, DEVICE, MODEL_NAME)
 
                         if img_embedding is not None:
                             emb_path = utils.get_embedding_path(img_path.name, EMBEDDINGS_DIR)
-                            # Lưu embedding vào CPU để đảm bảo tương thích khi load
                             torch.save(img_embedding.cpu(), emb_path)
                             logger.info(f"Đã lưu embedding cho {img_path.name} vào {emb_path}")
-                            processed_count += 1
+                            processed_count += 1 # Chỉ tăng khi tạo embedding thành công
                         else:
                             logger.error(f"Không thể tạo embedding cho ảnh: {img_path.name}. Bỏ qua.")
                             errored_files.append(img_path.name + " (Embedding failed)")
-                            # Không xóa ảnh đã xử lý, nhưng cũng không có embedding cho nó
 
                     except Exception as emb_err:
                         logger.error(f"Lỗi khi tạo embedding cho {img_path.name}: {emb_err}", exc_info=True)
                         errored_files.append(img_path.name + f" (Embedding error: {emb_err})")
 
             except Exception as file_err:
-                 logger.error(f"Lỗi nghiêm trọng khi xử lý file {file_name}: {file_err}", exc_info=True)
-                 errored_files.append(file_name + f" (Processing error: {file_err})")
+                logger.error(f"Lỗi nghiêm trọng khi xử lý file {file_name}: {file_err}", exc_info=True)
+                errored_files.append(file_name + f" (Processing error: {file_err})")
 
             # Cập nhật progress bar sau mỗi file gốc
             progress_bar.progress((i + 1) / total_files)
@@ -159,10 +189,50 @@ with st.sidebar:
             st.warning("Một số files/ảnh gặp lỗi trong quá trình xử lý:")
             st.json(errored_files) # Hiển thị danh sách lỗi
 
+        # --- CHANGE START: Rerun để cập nhật danh sách ảnh hiển thị ---
+        # Sau khi xử lý xong, chạy lại script để phần hiển thị ảnh được cập nhật
+        if all_processed_image_paths_this_run: # Chỉ rerun nếu có xử lý ảnh mới
+            st.rerun()
+        # --- CHANGE END ---
+
     elif process_button and not uploaded_files:
         st.warning("Vui lòng tải lên ít nhất một file.")
 
-# --- Phần Retrieval (Main Area) ---
+    # --- CHANGE START: Phần hiển thị ảnh đã xử lý ---
+    st.markdown("---")
+    st.header("Ảnh Đã Xử Lý")
+    st.caption(f"Hiển thị ảnh từ: `{PROCESSED_IMAGES_DIR}`")
+
+    # Quét thư mục processed_images
+    processed_image_files = []
+    if PROCESSED_IMAGES_DIR.is_dir():
+        processed_image_files = sorted(
+            [f for f in PROCESSED_IMAGES_DIR.iterdir()
+             if f.is_file() and f.suffix.lower() in ['.png', '.jpg', '.jpeg', '.webp']],
+            key=lambda x: x.name # Sắp xếp theo tên file
+        )
+
+    if processed_image_files:
+        # Sử dụng expander để không chiếm quá nhiều không gian ban đầu
+        with st.expander(f"Hiện có {len(processed_image_files)} ảnh đã xử lý", expanded=False):
+             # Giới hạn số lượng ảnh hiển thị trực tiếp để tránh làm chậm sidebar
+            max_images_to_show_in_sidebar = 20
+            for i, img_path in enumerate(processed_image_files):
+                if i >= max_images_to_show_in_sidebar:
+                    st.caption(f"... và {len(processed_image_files) - max_images_to_show_in_sidebar} ảnh khác.")
+                    break
+                try:
+                    # Hiển thị ảnh với chiều rộng vừa với container sidebar
+                    st.image(str(img_path), caption=img_path.name, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"Lỗi khi hiển thị ảnh {img_path.name}: {e}")
+                st.markdown("---") # Thêm dòng kẻ phân cách giữa các ảnh (tùy chọn)
+    else:
+        st.info("Chưa có ảnh nào trong thư mục xử lý.")
+    # --- CHANGE END ---
+
+
+# --- Phần Retrieval (Main Area - giữ nguyên như cũ) ---
 st.header("2. Tìm kiếm Tài liệu")
 
 search_type = st.radio("Tìm kiếm bằng:", ("Văn bản", "Hình ảnh"), key="search_type")
@@ -201,18 +271,19 @@ if search_button:
         with st.spinner("Đang tạo embedding cho câu hỏi..."):
             query_embedding = embedding.get_text_embedding(query_text, model, processor, DEVICE, MODEL_NAME)
         if query_embedding is None:
-             st.error("Không thể tạo embedding cho câu hỏi. Vui lòng thử lại.")
-             valid_query = False
+            st.error("Không thể tạo embedding cho câu hỏi. Vui lòng thử lại.")
+            valid_query = False
 
     elif search_type == "Hình ảnh" and query_image_pil:
-         valid_query = True
-         with st.spinner("Đang tạo embedding cho ảnh query..."):
-             query_embedding = embedding.get_image_embedding(query_image_pil, model, processor, DEVICE, MODEL_NAME)
-         if query_embedding is None:
-              st.error("Không thể tạo embedding cho ảnh query. Vui lòng thử lại.")
-              valid_query = False
+        valid_query = True
+        with st.spinner("Đang tạo embedding cho ảnh query..."):
+            query_embedding = embedding.get_image_embedding(query_image_pil, model, processor, DEVICE, MODEL_NAME)
+        if query_embedding is None:
+            st.error("Không thể tạo embedding cho ảnh query. Vui lòng thử lại.")
+            valid_query = False
 
-    elif not query_text and not query_image_pil:
+    elif (search_type == "Văn bản" and not query_text) or \
+         (search_type == "Hình ảnh" and not query_image_pil):
         st.warning("Vui lòng nhập câu hỏi hoặc tải lên ảnh để tìm kiếm.")
 
     # --- Thực hiện Tìm kiếm nếu Query hợp lệ ---
@@ -223,17 +294,17 @@ if search_button:
             # 1. Tải tất cả embeddings đã lưu
             all_embeddings, embedding_filenames = retrieval.load_all_embeddings(EMBEDDINGS_DIR, DEVICE)
 
-            if not all_embeddings:
+            if not all_embeddings or not embedding_filenames: # Kiểm tra cả hai
                 st.warning("Chưa có tài liệu nào được xử lý và lưu embedding. Vui lòng upload và xử lý tài liệu trước.")
             else:
                 # 2. Tìm kiếm Top-K
                 # Chuyển query_embedding lên đúng device trước khi tìm kiếm
                 results = retrieval.find_top_k(
                     query_embedding.to(DEVICE), # Đảm bảo query embedding trên đúng device
-                    all_embeddings,      # Đã được load lên device
+                    all_embeddings,       # Đã được load lên device
                     embedding_filenames,
-                    processor,
-                    k_value
+                    k_value # Truyền K value vào hàm find_top_k (Cần đảm bảo hàm này nhận K)
+                            # Lưu ý: Hàm find_top_k gốc có thể không cần processor, kiểm tra lại định nghĩa hàm
                 )
                 search_end_time = time.time()
                 logger.info(f"Tìm kiếm hoàn tất trong {search_end_time - search_start_time:.2f} giây.")
@@ -247,6 +318,8 @@ if search_button:
                     num_columns = 3 # Số cột hiển thị kết quả
                     cols = st.columns(num_columns)
                     for i, (score, emb_filename) in enumerate(results):
+                        # Lấy tên file ảnh gốc từ tên file embedding
+                        # (Giả sử hàm utils.get_image_path_from_embedding làm điều này)
                         image_path = utils.get_image_path_from_embedding(emb_filename, PROCESSED_IMAGES_DIR)
                         if image_path and image_path.is_file():
                             col_index = i % num_columns
@@ -256,4 +329,16 @@ if search_button:
                                 st.caption(f"Score: {score:.4f}")
                                 st.markdown("---") # Ngăn cách giữa các kết quả trong cùng cột
                         else:
-                            st.warning(f"Không tìm thấy file ảnh cho embedding: {emb_filename}")
+                             # Tìm lại tên ảnh gốc nếu hàm get_image_path_from_embedding không hoạt động đúng
+                            possible_image_name = emb_filename.replace(".pt", "") # Tên file ảnh thường là tên embedding bỏ .pt
+                            potential_image_path = PROCESSED_IMAGES_DIR / possible_image_name
+                            if potential_image_path.is_file():
+                                 col_index = i % num_columns
+                                 with cols[col_index]:
+                                    st.image(str(potential_image_path), use_container_width=True)
+                                    st.caption(f"Tên file: {potential_image_path.name}")
+                                    st.caption(f"Score: {score:.4f}")
+                                    st.markdown("---")
+                            else:
+                                logger.warning(f"Không tìm thấy file ảnh gốc cho embedding: {emb_filename} tại đường dẫn {potential_image_path} hoặc {image_path}")
+                                st.warning(f"Không tìm thấy file ảnh cho embedding: {emb_filename}")
